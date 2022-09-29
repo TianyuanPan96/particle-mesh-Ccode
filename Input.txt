@@ -1,0 +1,7 @@
+epsilon = 1.0
+kappa = 200.0
+dt = 0.001
+tmax = 100000000
+Nbb = 20
+Nsc = 8
+D = 17.0
