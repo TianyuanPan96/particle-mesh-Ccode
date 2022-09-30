@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <math.h>
 #include <time.h>
 
@@ -24,6 +25,7 @@ long initRan();
 void initialize_polymer(int nchain, int natom_perchain, int itype, double bb, double box_size,
                         int start_idx, int mol_start_idx,
                         int *particle_type, int *molecule_id, double **coords, long *idum);
+int metro_crit(double enrg_diff, long *idum);
 void get_mesh_density(int natom_total, double grid_size, int maxsite_1d, int pm_type,
                       double density_A_ideal, double density_B_ideal,
                       double grid_shift[3], double **coords, int *particle_type, double ****density_grids);
@@ -82,11 +84,11 @@ int main(int argc, const char *argv[])
     Re = sqrt(nbonds_perchain * bondlen_sqr);
     ReReRe = Re * Re * Re;
     density = natom_perchain * Nbar_sqrt / ReReRe;
-    box_volume = density * natom_total;
-    box_size = cbrt(box_volume);
+    // box_volume = density * natom_total;
+    // box_size = cbrt(box_volume);
     // For debug:
-    // box_size = 10.0;
-    // box_volume = box_size * box_size * box_size;
+    box_size = 10.0;
+    box_volume = box_size * box_size * box_size;
     maxsite_1d = round(box_size / grid_size);
     nsites = maxsite_1d * maxsite_1d * maxsite_1d;
     density_A_ideal = natom_A / nsites; // ideal density of A at homogeneous
@@ -134,7 +136,6 @@ int main(int argc, const char *argv[])
     initialize_polymer(nchain_B, natom_perchain, 1, bondlen_sqr,
                        box_size, start_idx, mol_start_idx, particle_type, molecule_id, coords, idum);
 
-    // printf("%lf", coords[1][0]);
     // Write the initial configuration to a file
     FILE *init_config;
     init_config = fopen("ini.cfg", "w");
@@ -164,6 +165,8 @@ int main(int argc, const char *argv[])
     grid_shift[0] = 0;
     grid_shift[1] = 0;
     grid_shift[2] = 0;
+    get_mesh_density(natom_total, grid_size, maxsite_1d, pm_type, density_A_ideal, density_B_ideal,
+                     grid_shift, coords, particle_type, density_grids);
     get_mesh_density(natom_total, grid_size, maxsite_1d, pm_type, density_A_ideal, density_B_ideal,
                      grid_shift, coords, particle_type, density_grids);
 
@@ -321,6 +324,27 @@ void initialize_polymer(int nchain, int natom_perchain, int itype, double bb, do
     }     // done initialization
 }
 
+int metro_crit(double enrg_diff, long *idum)
+{
+    int res = 0;
+    double ran, prob;
+    if (enrg_diff <= 0)
+    {
+        res = 1;
+    }
+    else if ((enrg_diff > 0.0) && (enrg_diff <= 40.0))
+    {
+        ran = ran1(idum);
+        prob = exp(-enrg_diff);
+        if (ran <= prob)
+        {
+            res = 1;
+        }
+    }
+
+    return res;
+}
+
 // calculation of density profile of the meshgrids
 void get_mesh_density(int natom_total, double grid_size, int maxsite_1d, int pm_type,
                       double density_A_ideal, double density_B_ideal,
@@ -331,6 +355,8 @@ void get_mesh_density(int natom_total, double grid_size, int maxsite_1d, int pm_
     int atom_type;
     double density_temp[2];
 
+    // TODO: set the density grid to zero
+    // memset(density_grids, 0, 2 * maxsite_1d * maxsite_1d * maxsite_1d * sizeof(double));
     density_temp[0] = density_A_ideal;
     density_temp[1] = density_B_ideal;
     if (pm_type == 0)
@@ -350,6 +376,20 @@ void get_mesh_density(int natom_total, double grid_size, int maxsite_1d, int pm_
             zgrid = zgrid % maxsite_1d;
             // taking the normalization factor into account
             density_grids[atom_type][xgrid][ygrid][zgrid] += 1 / density_temp[atom_type];
+        }
+    }
+    // For debug:
+    for (int itype = 0; itype < 2; ++itype)
+    {
+        for (int i = 0; i < maxsite_1d; ++i)
+        {
+            for (int j = 0; j < maxsite_1d; ++j)
+            {
+                for (int k = 0; k < maxsite_1d; ++k)
+                {
+                    printf("%f\n", density_grids[itype][i][j][k]);
+                }
+            }
         }
     }
 }
@@ -388,9 +428,9 @@ double calc_singlemesh_energy(double phiA, double phiB, double chiN, double kapp
     return res;
 }
 
-double calc_total_bond_energy_harmonic(double **coords, int *molecule_id, double kspring)
-{
-}
+// double calc_total_bond_energy_harmonic(double **coords, int *molecule_id, double kspring)
+// {
+// }
 
 double calc_atom_bond_energy_harmonic(double **coords, int natom_total, int iatom, int *molecule_id, double kspring, double box_size)
 {
@@ -513,7 +553,6 @@ void mc_atom_displ(int iatom, double displ, double ****density_grids, double den
     double theta, phi;
     double rx_new, ry_new, rz_new;
     int xgrid_new, ygrid_new, zgrid_new;
-    double **coords_new;
     // Randomly get theta angle(xy plane)
     theta = ran1(idum) * 2.0 * M_PI;
     // randomly get cos() value ranging from -1 to 1 to set 2Pi rotation angle from z axis
@@ -522,11 +561,10 @@ void mc_atom_displ(int iatom, double displ, double ****density_grids, double den
     rx_new = rx + displ * cos(theta) * sin(phi);
     ry_new = ry + displ * sin(theta) * sin(phi);
     rz_new = rz + displ * cos(phi);
-    // save the new coordinate to a temp matrix
-    coords_new = coords;
-    coords_new[iatom][0] = rx_new;
-    coords_new[iatom][1] = ry_new;
-    coords_new[iatom][2] = rz_new;
+    // wrap around the periodic boundary condition
+    rx_new -= box_size * floor(rx_new / box_size);
+    ry_new -= box_size * floor(ry_new / box_size);
+    rz_new -= box_size * floor(rz_new / box_size);
 
     // identify the grid that the particle is moved to, taking a grid shift into account
     xgrid_new = rx_new / grid_size + grid_shift[0];
@@ -563,20 +601,44 @@ void mc_atom_displ(int iatom, double displ, double ****density_grids, double den
         phiB_new_from = phiB_old_from - 1 / density_B_ideal;
         phiB_new_to = phiB_old_to + 1 / density_B_ideal;
     }
+    // calculate the single mesh energy
     enrg_local_new = calc_singlemesh_energy(phiA_new_from, phiB_new_from, chiN, kappaN) +
                      calc_singlemesh_energy(phiA_new_to, phiB_new_to, chiN, kappaN);
 
+    // Calculate bond energy
     enrg_bond_old = calc_atom_bond_energy_harmonic(coords, natom_total, iatom, molecule_id, kspring, box_size);
-    enrg_bond_new = calc_atom_bond_energy_harmonic(coords_new, natom_total, iatom, molecule_id, kspring, box_size);
+
+    // move the particle to the new position and calculate the new bond energy
+    coords[iatom][0] = rx_new;
+    coords[iatom][1] = ry_new;
+    coords[iatom][2] = rz_new;
+    enrg_bond_new = calc_atom_bond_energy_harmonic(coords, natom_total, iatom, molecule_id, kspring, box_size);
 
     enrg_diff = (enrg_local_new - enrg_local_old) +
                 (enrg_bond_new - enrg_bond_old);
 
+    // Use metropolis criteria to determine whether to accept the move
     int iaccept;
-    // TODO: implement metropolis criteria
-    iaccept = metro_crit(enrg_diff);
-    if (iaccept == 1)
+    iaccept = metro_crit(enrg_diff, idum);
+    if (iaccept == 0)
     {
-        coords = coords_new;
+        // move back the particle if not accepted
+        coords[iatom][0] = rx;
+        coords[iatom][1] = ry;
+        coords[iatom][2] = rz;
+    }
+    else
+    {
+        // update the density profile if accepted
+        if (atom_type == 0)
+        {
+            density_grids[0][xgrid][ygrid][zgrid] = phiA_new_from;
+            density_grids[0][xgrid_new][ygrid_new][zgrid_new] = phiA_new_to;
+        }
+        else
+        {
+            density_grids[1][xgrid][ygrid][zgrid] = phiB_new_from;
+            density_grids[1][xgrid_new][ygrid_new][zgrid_new] = phiB_new_to;
+        }
     }
 }
