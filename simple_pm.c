@@ -35,6 +35,10 @@ double calc_singlemesh_energy(double phiA, double phiB, double chiN, double kapp
 
 double calc_atom_bond_energy_harmonic(double **coords, int natom_total, int iatom,
                                       int *molecule_id, double kspring, double box_size);
+void mc_atom_displ(int iatom, double displ, int *naccept, double ****density_grids, double density_A_ideal, double density_B_ideal,
+                   int *particle_type, double **coords, int *molecule_id, double box_size, double grid_size,
+                   int maxsite_1d, double chiN, double kappa, double kspring, int natom_perchain, int natom_total,
+                   double grid_shift[3], long *idum);
 
 int main(int argc, const char *argv[])
 {
@@ -43,10 +47,10 @@ int main(int argc, const char *argv[])
     int nbonds_perchain, nbonds_total;
 
     int pm_type;
-    double kappa, Nbar_sqrt, chiN, Re, ReReRe, bondlen, bondlen_sqr;
+    double kappa, kspring, Nbar_sqrt, chiN, Re, ReReRe, bondlen, bondlen_sqr;
     double grid_size;
 
-    int save_every, tot_mc_cycles, equil_cycles;
+    int save_every, tot_mc_cycles, equil_cycles, grid_shift_every;
 
     // File Input
     FILE *inputfile;
@@ -60,11 +64,13 @@ int main(int argc, const char *argv[])
     fscanf(inputfile, "bondlen = %lf\n", &bondlen);              // bond length           // End-to-end distance for a polymer
     fscanf(inputfile, "chiN = %lf\n", &chiN);                    // F-H parameter
     fscanf(inputfile, "kappa = %lf\n", &kappa);                  // imcompressible parameter
+    fscanf(inputfile, "kspring = %lf\n", &kspring);              // spring constant
 
-    fscanf(inputfile, "grid_size = %lf\n", &grid_size);        // mesh size
-    fscanf(inputfile, "save_every = %d\n", &save_every);       // saving interval
-    fscanf(inputfile, "tot_mc_cycles = %d\n", &tot_mc_cycles); // # of steps (exclude equil. steps)
-    fscanf(inputfile, "equil_cycles = %d\n", &equil_cycles);   // # of equil. steps
+    fscanf(inputfile, "grid_size = %lf\n", &grid_size);              // mesh size
+    fscanf(inputfile, "save_every = %d\n", &save_every);             // saving interval
+    fscanf(inputfile, "tot_mc_cycles = %d\n", &tot_mc_cycles);       // # of steps (exclude equil. steps)
+    fscanf(inputfile, "equil_cycles = %d\n", &equil_cycles);         // # of equil. steps
+    fscanf(inputfile, "grid_shift_every = %d\n", &grid_shift_every); // frequency of shift grid
 
     // fscanf(inputfile, "Nbb = %d\n", &Nbb);
     // fscanf(inputfile, "Nsc = %d\n", &Nsc);
@@ -79,11 +85,14 @@ int main(int argc, const char *argv[])
 
     double density, density_A_ideal, density_B_ideal;
     double box_size, box_volume;
+    double kappaN;
     int maxsite_1d, nsites;
     bondlen_sqr = bondlen * bondlen;
     Re = sqrt(nbonds_perchain * bondlen_sqr);
     ReReRe = Re * Re * Re;
     density = natom_perchain * Nbar_sqrt / ReReRe;
+    kappaN = kappa * natom_perchain;
+    kspring = kspring / bondlen_sqr;
     // box_volume = density * natom_total;
     // box_size = cbrt(box_volume);
     // For debug:
@@ -167,13 +176,42 @@ int main(int argc, const char *argv[])
     grid_shift[2] = 0;
     get_mesh_density(natom_total, grid_size, maxsite_1d, pm_type, density_A_ideal, density_B_ideal,
                      grid_shift, coords, particle_type, density_grids);
-    get_mesh_density(natom_total, grid_size, maxsite_1d, pm_type, density_A_ideal, density_B_ideal,
-                     grid_shift, coords, particle_type, density_grids);
 
     // Equilibration run
     int t;
+    int naccept = 0;
+    int nattempt = 0;
     for (t = 0; t <= equil_cycles; ++t)
     {
+        // use a new grid_shift every so often
+        if (t % grid_shift_every == 0)
+        {
+            for (int itype = 0; itype < 2; ++itype)
+            {
+                for (int i = 0; i < maxsite_1d; ++i)
+                {
+                    for (int j = 0; j < maxsite_1d; ++j)
+                    {
+                        memset(density_grids[itype][i][j], 0, maxsite_1d * sizeof(double));
+                    }
+                }
+            }
+            grid_shift[0] = 0.5 * ran1(idum);
+            grid_shift[1] = 0.5 * ran1(idum);
+            grid_shift[2] = 0.5 * ran1(idum);
+            get_mesh_density(natom_total, grid_size, maxsite_1d, pm_type, density_A_ideal, density_B_ideal,
+                             grid_shift, coords, particle_type, density_grids);
+        }
+        for (int i = 0; i < natom_total; ++i)
+        {
+            mc_atom_displ(i, 0.5 * bondlen, &naccept, density_grids, density_A_ideal, density_B_ideal,
+                          particle_type, coords, molecule_id, box_size, grid_size, maxsite_1d, chiN, kappaN, kspring,
+                          natom_perchain, natom_total, grid_shift, idum);
+            nattempt += 1;
+        }
+        if (t % save_every == 0)
+        {
+        }
     }
 }
 
@@ -355,7 +393,7 @@ void get_mesh_density(int natom_total, double grid_size, int maxsite_1d, int pm_
     int atom_type;
     double density_temp[2];
 
-    // TODO: set the density grid to zero
+    // TODO: set the density grid to zero within the function
     // memset(density_grids, 0, 2 * maxsite_1d * maxsite_1d * maxsite_1d * sizeof(double));
     density_temp[0] = density_A_ideal;
     density_temp[1] = density_B_ideal;
@@ -379,6 +417,7 @@ void get_mesh_density(int natom_total, double grid_size, int maxsite_1d, int pm_
         }
     }
     // For debug:
+    printf("%f %f %f\n", grid_shift[0], grid_shift[1], grid_shift[2]);
     for (int itype = 0; itype < 2; ++itype)
     {
         for (int i = 0; i < maxsite_1d; ++i)
@@ -527,8 +566,8 @@ double calc_atom_bond_energy_harmonic(double **coords, int natom_total, int iato
     return res;
 }
 
-void mc_atom_displ(int iatom, double displ, double ****density_grids, double density_A_ideal, double density_B_ideal,
-                   double *particle_type, double **coords, int *molecule_id, double box_size, double grid_size,
+void mc_atom_displ(int iatom, double displ, int *naccept, double ****density_grids, double density_A_ideal, double density_B_ideal,
+                   int *particle_type, double **coords, int *molecule_id, double box_size, double grid_size,
                    int maxsite_1d, double chiN, double kappa, double kspring, int natom_perchain, int natom_total,
                    double grid_shift[3], long *idum)
 {
@@ -620,6 +659,7 @@ void mc_atom_displ(int iatom, double displ, double ****density_grids, double den
     // Use metropolis criteria to determine whether to accept the move
     int iaccept;
     iaccept = metro_crit(enrg_diff, idum);
+    *naccept += iaccept;
     if (iaccept == 0)
     {
         // move back the particle if not accepted
