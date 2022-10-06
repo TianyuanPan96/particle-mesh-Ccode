@@ -23,8 +23,8 @@ float ran1(long *idum);
 float gasdev(long *idum);
 long initRan();
 void initialize_polymer(int nchain, int natom_perchain, int itype, double bb, double box_size,
-                        int start_idx, int mol_start_idx,
-                        int *particle_type, int *molecule_id, double **coords, long *idum);
+                        int start_idx, int mol_start_idx, int *particle_type, int *molecule_id,
+                        double **coords, int **bonds, long *idum);
 int metro_crit(double enrg_diff, long *idum);
 void get_mesh_density(int natom_total, double grid_size, int maxsite_1d, int pm_type,
                       double density_A_ideal, double density_B_ideal,
@@ -32,7 +32,8 @@ void get_mesh_density(int natom_total, double grid_size, int maxsite_1d, int pm_
 double calc_total_particlemesh_energy(double ****density_grids, double chiN, double kappa,
                                       double Nbar_sqrt, double ReReRe, int natom_perchain, int maxsite_1d);
 double calc_singlemesh_energy(double phiA, double phiB, double chiN, double kappaN);
-
+double calc_total_bond_energy_harmonic(double **coords, int **bonds, int nbonds_total,
+                                       double kspring, double box_size);
 double calc_atom_bond_energy_harmonic(double **coords, int natom_total, int iatom,
                                       int *molecule_id, double kspring, double box_size);
 void mc_atom_displ(int iatom, double displ, int *naccept, double ****density_grids, double density_A_ideal, double density_B_ideal,
@@ -92,12 +93,13 @@ int main(int argc, const char *argv[])
     ReReRe = Re * Re * Re;
     density = natom_perchain * Nbar_sqrt / ReReRe;
     kappaN = kappa * natom_perchain;
+    // spring constant is 1.5 / b^2
     kspring = kspring / bondlen_sqr;
-    // box_volume = density * natom_total;
-    // box_size = cbrt(box_volume);
+    box_volume = density * natom_total;
+    box_size = cbrt(box_volume);
     // For debug:
-    box_size = 10.0;
-    box_volume = box_size * box_size * box_size;
+    // box_size = 10.0;
+    // box_volume = box_size * box_size * box_size;
     maxsite_1d = round(box_size / grid_size);
     nsites = maxsite_1d * maxsite_1d * maxsite_1d;
     density_A_ideal = natom_A / nsites; // ideal density of A at homogeneous
@@ -116,6 +118,13 @@ int main(int argc, const char *argv[])
         coords[i] = (double *)calloc(3, sizeof(double));
     }
     // coords[0][0] = 0;
+    // bond table, 2d array (nbonds, 3)
+    int **bonds;
+    bonds = (int **)calloc(nbonds_total, sizeof(int *));
+    for (int i = 0; i < nbonds_total; ++i)
+    {
+        bonds[i] = (int *)calloc(2, sizeof(int));
+    }
     // density profile, 4d array (num_atom_types, num_grid, num_grid, num_grid)
     double ****density_grids = calloc(2, sizeof(double ***));
     for (int itype = 0; itype < 2; ++itype)
@@ -138,12 +147,12 @@ int main(int argc, const char *argv[])
     // Initialize polymers
     int start_idx = 0;
     int mol_start_idx = 0;
-    initialize_polymer(nchain_A, natom_perchain, 0, bondlen_sqr,
-                       box_size, start_idx, mol_start_idx, particle_type, molecule_id, coords, idum);
+    initialize_polymer(nchain_A, natom_perchain, 0, bondlen_sqr, box_size, start_idx,
+                       mol_start_idx, particle_type, molecule_id, coords, bonds, idum);
     start_idx = natom_A;
     mol_start_idx = nchain_A;
-    initialize_polymer(nchain_B, natom_perchain, 1, bondlen_sqr,
-                       box_size, start_idx, mol_start_idx, particle_type, molecule_id, coords, idum);
+    initialize_polymer(nchain_B, natom_perchain, 1, bondlen_sqr, box_size, start_idx,
+                       mol_start_idx, particle_type, molecule_id, coords, bonds, idum);
 
     // Write the initial configuration to a file
     FILE *init_config;
@@ -167,6 +176,15 @@ int main(int argc, const char *argv[])
         fprintf(init_config, "%d %d %d %f %f %f\n", i + 1, molecule_id[i], particle_type[i] + 1,
                 coords[i][0], coords[i][1], coords[i][2]);
     }
+
+    fprintf(init_config, "\n");
+    fprintf(init_config, "Bonds\n");
+    fprintf(init_config, "\n");
+
+    for (int i = 0; i < nbonds_total; ++i)
+    {
+        fprintf(init_config, "%d 1 %d %d\n", i + 1, bonds[i][0] + 1, bonds[i][1] + 1);
+    }
     fclose(init_config);
 
     // Get the initial density profile, with grid shift = 0
@@ -177,10 +195,21 @@ int main(int argc, const char *argv[])
     get_mesh_density(natom_total, grid_size, maxsite_1d, pm_type, density_A_ideal, density_B_ideal,
                      grid_shift, coords, particle_type, density_grids);
 
-    // Equilibration run
+    // equilibration run
+    // Write the thermo info to a file
+    double mesh_energy, bond_energy, total_energy;
+    FILE *thermo;
+    char *thermo_filename = malloc(sizeof(char) * 30);
+    sprintf(thermo_filename, "thermo_N%d_A%d_B%d.txt", natom_perchain, nchain_A, nchain_B);
+    thermo = fopen(thermo_filename, "w");
+    fprintf(thermo, "t\tmesh_energy\tbond_energy\ttotal_energy\n");
+    fclose(thermo);
+
+    thermo = fopen(thermo_filename, "a");
     int t;
     int naccept = 0;
     int nattempt = 0;
+    double acc_rate = 0.0;
     for (t = 0; t <= equil_cycles; ++t)
     {
         // use a new grid_shift every so often
@@ -202,6 +231,8 @@ int main(int argc, const char *argv[])
             get_mesh_density(natom_total, grid_size, maxsite_1d, pm_type, density_A_ideal, density_B_ideal,
                              grid_shift, coords, particle_type, density_grids);
         }
+
+        // MC atom displacement move for each particle in the system
         for (int i = 0; i < natom_total; ++i)
         {
             mc_atom_displ(i, 0.5 * bondlen, &naccept, density_grids, density_A_ideal, density_B_ideal,
@@ -209,10 +240,85 @@ int main(int argc, const char *argv[])
                           natom_perchain, natom_total, grid_shift, idum);
             nattempt += 1;
         }
+
+        // save thermo info every so often
         if (t % save_every == 0)
         {
+            acc_rate = naccept / nattempt;
+            mesh_energy = calc_total_particlemesh_energy(density_grids, chiN, kappa, Nbar_sqrt, ReReRe,
+                                                         natom_perchain, maxsite_1d);
+            bond_energy = calc_total_bond_energy_harmonic(coords, bonds, nbonds_total, kspring, box_size);
+            total_energy = mesh_energy + bond_energy;
+            fprintf(thermo, "%d\t%lf\t%lf\t%lf\t%lf\n", t, mesh_energy, bond_energy, total_energy, acc_rate);
         }
     }
+
+    fprintf(thermo, "\nEnd of Equilibration\n\n");
+
+    // production run
+    naccept = 0;
+    nattempt = 0;
+
+    // Write the initial configuration to xyz file
+    FILE *traj;
+    char *traj_name = malloc(sizeof(char) * 30);
+    sprintf(traj_name, "traj_N%d_A%d_B%d.xyz", natom_perchain, nchain_A, nchain_B);
+    traj = fopen(traj_name, "w");
+    // fprintf(traj, "#trajectory file\n");
+    fclose(traj);
+
+    traj = fopen(traj_name, "a");
+
+    for (t = 0; t <= tot_mc_cycles; ++t)
+    {
+        // use a new grid_shift every so often
+        if (t % grid_shift_every == 0)
+        {
+            for (int itype = 0; itype < 2; ++itype)
+            {
+                for (int i = 0; i < maxsite_1d; ++i)
+                {
+                    for (int j = 0; j < maxsite_1d; ++j)
+                    {
+                        memset(density_grids[itype][i][j], 0, maxsite_1d * sizeof(double));
+                    }
+                }
+            }
+            grid_shift[0] = 0.5 * ran1(idum);
+            grid_shift[1] = 0.5 * ran1(idum);
+            grid_shift[2] = 0.5 * ran1(idum);
+            get_mesh_density(natom_total, grid_size, maxsite_1d, pm_type, density_A_ideal, density_B_ideal,
+                             grid_shift, coords, particle_type, density_grids);
+        }
+
+        // MC atom displacement move for each particle in the system
+        for (int i = 0; i < natom_total; ++i)
+        {
+            mc_atom_displ(i, 0.5 * bondlen, &naccept, density_grids, density_A_ideal, density_B_ideal,
+                          particle_type, coords, molecule_id, box_size, grid_size, maxsite_1d, chiN, kappaN, kspring,
+                          natom_perchain, natom_total, grid_shift, idum);
+            nattempt += 1;
+        }
+
+        // save trajectory and thermo every so often
+        if (t % save_every == 0)
+        {
+            fprintf(traj, "%d\n%d 1.500000\n", natom_total, t);
+            for (int i = 0; i < natom_total; ++i)
+            {
+                fprintf(traj, "%d %lf %lf %lf\n", particle_type[i], coords[i][0], coords[i][1], coords[i][2]);
+            }
+            acc_rate = naccept / nattempt;
+            mesh_energy = calc_total_particlemesh_energy(density_grids, chiN, kappa, Nbar_sqrt, ReReRe,
+                                                         natom_perchain, maxsite_1d);
+            bond_energy = calc_total_bond_energy_harmonic(coords, bonds, nbonds_total, kspring, box_size);
+            total_energy = mesh_energy + bond_energy;
+            fprintf(thermo, "%d\t%lf\t%lf\t%lf\t%lf\n", t, mesh_energy, bond_energy, total_energy, acc_rate);
+        }
+    }
+
+    fclose(traj);
+    fclose(thermo);
 }
 
 float ran1(long *idum)
@@ -300,13 +406,15 @@ long initRan()
 
 // initialization of polymer
 void initialize_polymer(int nchain, int natom_perchain, int itype, double bb, double box_size,
-                        int start_idx, int mol_start_idx,
-                        int *particle_type, int *molecule_id, double **coords, long *idum)
+                        int start_idx, int mol_start_idx, int *particle_type, int *molecule_id,
+                        double **coords, int **bonds, long *idum)
 {
     double theta, phi;
     int index;
     double b = sqrt(bb);
     // double b = 1;
+    int ibond;
+    ibond = start_idx - mol_start_idx;
     for (int i = 0; i < nchain; ++i)
     {
         // Randomizing positions/locations of the first bead(=index 0, 1N, 2N-th...) of each polymer
@@ -344,6 +452,10 @@ void initialize_polymer(int nchain, int natom_perchain, int itype, double bb, do
             particle_type[index] = itype;
             // assign the molecule ID
             molecule_id[index] = mol_start_idx + i + 1;
+            // create an entry for a bond
+            bonds[ibond][0] = index - 1;
+            bonds[ibond][1] = index;
+            ibond += 1;
 
             // If our new chain goes outside of the periodic box, we wrap around to the other side of the box
             coords[index][0] -= box_size * floor(coords[index][0] / box_size);
@@ -357,6 +469,7 @@ void initialize_polymer(int nchain, int natom_perchain, int itype, double bb, do
             // printf("%lf\t", coords[index][1]);
             // printf("%lf\t", coords[index][2]);
             // printf("\n");
+            // printf("%d %d\n", bonds[ibond][0], bonds[ibond][1]);
 
         } // iterate to complete one chain
     }     // done initialization
@@ -417,20 +530,23 @@ void get_mesh_density(int natom_total, double grid_size, int maxsite_1d, int pm_
         }
     }
     // For debug:
-    printf("%f %f %f\n", grid_shift[0], grid_shift[1], grid_shift[2]);
-    for (int itype = 0; itype < 2; ++itype)
-    {
-        for (int i = 0; i < maxsite_1d; ++i)
-        {
-            for (int j = 0; j < maxsite_1d; ++j)
-            {
-                for (int k = 0; k < maxsite_1d; ++k)
-                {
-                    printf("%f\n", density_grids[itype][i][j][k]);
-                }
-            }
-        }
-    }
+    // double total_des = 0;
+    // printf("Grid shift: %f %f %f\n", grid_shift[0], grid_shift[1], grid_shift[2]);
+    // for (int itype = 0; itype < 2; ++itype)
+    // {
+    //     for (int i = 0; i < maxsite_1d; ++i)
+    //     {
+    //         for (int j = 0; j < maxsite_1d; ++j)
+    //         {
+    //             for (int k = 0; k < maxsite_1d; ++k)
+    //             {
+    //                 printf("%f\n", density_grids[itype][i][j][k]);
+    //                 total_des += density_grids[itype][i][j][k];
+    //             }
+    //         }
+    //     }
+    // }
+    // printf("Total density: %f\n", total_des);
 }
 
 double calc_total_particlemesh_energy(double ****density_grids, double chiN, double kappa,
@@ -467,9 +583,56 @@ double calc_singlemesh_energy(double phiA, double phiB, double chiN, double kapp
     return res;
 }
 
-// double calc_total_bond_energy_harmonic(double **coords, int *molecule_id, double kspring)
-// {
-// }
+double calc_total_bond_energy_harmonic(double **coords, int **bonds, int nbonds_total,
+                                       double kspring, double box_size)
+{
+    double res = 0;
+    double rx1, ry1, rz1;
+    double rx2, ry2, rz2;
+    int i, iatm1, iatm2;
+    double xdiff, ydiff, zdiff;
+    for (i = 0; i < nbonds_total; ++i)
+    {
+        iatm1 = bonds[i][0];
+        iatm2 = bonds[i][1];
+        rx1 = coords[iatm1][0];
+        ry1 = coords[iatm1][1];
+        rz1 = coords[iatm1][2];
+        rx2 = coords[iatm2][0];
+        ry2 = coords[iatm2][1];
+        rz2 = coords[iatm2][2];
+        xdiff = rx1 - rx2;
+        if (xdiff > box_size * 0.5)
+        {
+            xdiff -= box_size;
+        }
+        if (xdiff < -box_size * 0.5)
+        {
+            xdiff += box_size;
+        }
+        ydiff = ry1 - ry2;
+        if (ydiff > box_size * 0.5)
+        {
+            ydiff -= box_size;
+        }
+        if (ydiff < -box_size * 0.5)
+        {
+            ydiff += box_size;
+        }
+        zdiff = rz1 - rz2;
+        if (zdiff > box_size * 0.5)
+        {
+            zdiff -= box_size;
+        }
+        if (zdiff < -box_size * 0.5)
+        {
+            zdiff += box_size;
+        }
+
+        res += kspring * (xdiff * xdiff + ydiff * ydiff + zdiff * zdiff);
+    }
+    return res;
+}
 
 double calc_atom_bond_energy_harmonic(double **coords, int natom_total, int iatom, int *molecule_id, double kspring, double box_size)
 {
