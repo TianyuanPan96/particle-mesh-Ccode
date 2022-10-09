@@ -1,0 +1,17 @@
+nchain_A = 100
+nchain_B = 100
+natom_perchain = 32
+natom_total = 6400
+nbonds_total = 6200
+pm_type = 0
+density = 1.000000
+bondlen = 1.000000
+chi = 1.000000
+kappa = 1.562500
+kspring = 1.500000
+box_size = 18.566355
+grid_size = 2.466200
+maxsite_1d = 8
+nsites = 512
+density_A_ideal = 6.250000
+density_B_ideal = 6.250000
