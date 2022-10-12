@@ -1,7 +1,7 @@
 nchain_A = 100
 nchain_B = 100
 natom_perchain = 32
-pm_type = 0
+pm_type = 1
 bondlen = 1.0
 chi = 1.0
 kappa = 1.5625
