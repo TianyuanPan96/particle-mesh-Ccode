@@ -30,8 +30,7 @@ void initialize_polymer(long long int nchain, long long int natom_perchain, int 
                         int start_idx, int mol_start_idx, int *particle_type, int *molecule_id,
                         double **coords, int **bonds, int **atom_bond_list, long *idum);
 int metro_crit(double enrg_diff, long *idum);
-void get_mesh_density(long long int natom_total, double grid_size, int maxsite_1d, int pm_type,
-                      double density_A_ideal, double density_B_ideal,
+void get_mesh_density(long long int natom_total, double grid_size, int maxsite_1d, int pm_type, double rho_norm,
                       double grid_shift[3], double **coords, int *particle_type, double ****density_grids);
 double calc_total_particlemesh_energy(double ****density_grids, double chi, double kappa,
                                       double density, int maxsite_1d);
@@ -40,9 +39,9 @@ double calc_total_bond_energy_harmonic(double **coords, int **bonds, int nbonds_
                                        double kspring, double box_size);
 double calc_atom_bond_energy_harmonic(double **coords, int **atom_bond_list, int iatom,
                                       double kspring, double box_size);
-void mc_atom_displ(int iatom, double displ, int pm_type, unsigned long long *naccept, double ****density_grids, double density_A_ideal, double density_B_ideal,
-                   int *particle_type, double **coords, int **atom_bond_list, double box_size, double grid_size,
-                   int maxsite_1d, double chi, double kappa, double density, double kspring, long long int natom_total,
+void mc_atom_displ(int iatom, double displ, int pm_type, unsigned long long *naccept, double ****density_grids, double density,
+                   int *particle_type, double **coords, int **atom_bond_list, double box_size, double grid_size, double rho_norm,
+                   int maxsite_1d, double chi, double kappa, double kspring, long long int natom_total,
                    double grid_shift[3], long *idum);
 
 int main(int argc, const char *argv[])
@@ -96,7 +95,7 @@ int main(int argc, const char *argv[])
     // nbonds_perchain = natom_perchain - 1;  // # of bonds per chain
     // nbonds_total = natom_total - nchain;   // total # of bonds
 
-    double density, density_A_ideal, density_B_ideal;
+    double density, rho_norm;
     double box_size, box_volume;
 
     int nsites;
@@ -106,7 +105,11 @@ int main(int argc, const char *argv[])
     Re = sqrt(nbonds_perchain * bondlen_sqr);
     ReReRe = Re * Re * Re;
     grid_size = grid_size * Re;
-    // density = natom_perchain * Nbar_sqrt / ReReRe;
+    // IMPORTANT NOTE:
+    // "density" refers to the number density of bead, whereas
+    // "rho_norm" refers to the normalized density in perfectly homogeneous melt
+    // These two are DIFFERENT!!!
+    // Here, assume nint = 30, density = nint / deltaL**3
     density = 30 / (grid_size * grid_size * grid_size);
 
     // spring constant is 1.5 / b^2
@@ -121,9 +124,8 @@ int main(int argc, const char *argv[])
     natom_A = nchain_A * natom_perchain;
     natom_B = nchain_B * natom_perchain;
     natom_total = natom_A + natom_B;
-    nbonds_total = natom_total - nchain;        // total # of bonds
-    density_A_ideal = (double)natom_A / nsites; // ideal density of A at homogeneous
-    density_B_ideal = (double)natom_B / nsites; // ideal density of B at homogeneous
+    nbonds_total = natom_total - nchain;     // total # of bonds
+    rho_norm = (double)natom_total / nsites; // normalized density in perfectly homogeneous melt
 
     FILE *outputfile;
     outputfile = fopen("output.txt", "w");
@@ -134,6 +136,7 @@ int main(int argc, const char *argv[])
     fprintf(outputfile, "nbonds_total = %d\n", nbonds_total);
     fprintf(outputfile, "pm_type = %d\n", pm_type);
     fprintf(outputfile, "density = %lf\n", density);
+    fprintf(outputfile, "rho_norm = %lf\n", rho_norm);
     fprintf(outputfile, "bondlen = %lf\n", bondlen);
     fprintf(outputfile, "chi = %lf\n", chi);
     fprintf(outputfile, "kappa = %lf\n", kappa);
@@ -142,8 +145,6 @@ int main(int argc, const char *argv[])
     fprintf(outputfile, "grid_size = %lf\n", grid_size);
     fprintf(outputfile, "maxsite_1d = %d\n", maxsite_1d);
     fprintf(outputfile, "nsites = %d\n", nsites);
-    fprintf(outputfile, "density_A_ideal = %lf\n", density_A_ideal);
-    fprintf(outputfile, "density_B_ideal = %lf\n", density_B_ideal);
 
     fclose(outputfile);
 
@@ -251,7 +252,7 @@ int main(int argc, const char *argv[])
     grid_shift[0] = 0;
     grid_shift[1] = 0;
     grid_shift[2] = 0;
-    get_mesh_density(natom_total, grid_size, maxsite_1d, pm_type, density_A_ideal, density_B_ideal,
+    get_mesh_density(natom_total, grid_size, maxsite_1d, pm_type, rho_norm,
                      grid_shift, coords, particle_type, density_grids);
 
     // equilibration run
@@ -297,38 +298,18 @@ int main(int argc, const char *argv[])
             grid_shift[0] = 0.5 * ran1(idum);
             grid_shift[1] = 0.5 * ran1(idum);
             grid_shift[2] = 0.5 * ran1(idum);
-            get_mesh_density(natom_total, grid_size, maxsite_1d, pm_type, density_A_ideal, density_B_ideal,
+            get_mesh_density(natom_total, grid_size, maxsite_1d, pm_type, rho_norm,
                              grid_shift, coords, particle_type, density_grids);
-
-            // For debug:
-            // for (int itype = 0; itype < 2; ++itype)
-            // {
-            //     for (int i = 0; i < maxsite_1d; ++i)
-            //     {
-            //         for (int j = 0; j < maxsite_1d; ++j)
-            //         {
-            //             for (int k = 0; k < maxsite_1d; ++k)
-            //             {
-            //                 printf("%f\n", density_grids[itype][i][j][k]);
-            //             }
-            //         }
-            //     }
-            // }
         }
 
         // MC atom displacement move for each particle in the system
         for (int i = 0; i < natom_total; ++i)
         {
-            mc_atom_displ(i, bondlen, pm_type, &naccept, density_grids, density_A_ideal, density_B_ideal,
-                          particle_type, coords, atom_bond_list, box_size, grid_size, maxsite_1d, chi, kappa, density,
+            mc_atom_displ(i, bondlen, pm_type, &naccept, density_grids, density,
+                          particle_type, coords, atom_bond_list, box_size, grid_size, rho_norm, maxsite_1d, chi, kappa,
                           kspring, natom_total, grid_shift, idum);
             nattempt += 1;
         }
-        // For debug:
-        // mc_atom_displ(0, 0.5 * bondlen, &naccept, density_grids, density_A_ideal, density_B_ideal,
-        //               particle_type, coords, atom_bond_list, box_size, grid_size, maxsite_1d, chi, kappa, density,
-        //               kspring, natom_total, grid_shift, idum);
-        // nattempt += 1;
 
         // save thermo info every so often
         if (t % save_every == 0)
@@ -384,38 +365,19 @@ int main(int argc, const char *argv[])
             grid_shift[0] = 0.5 * ran1(idum);
             grid_shift[1] = 0.5 * ran1(idum);
             grid_shift[2] = 0.5 * ran1(idum);
-            get_mesh_density(natom_total, grid_size, maxsite_1d, pm_type, density_A_ideal, density_B_ideal,
+            get_mesh_density(natom_total, grid_size, maxsite_1d, pm_type, rho_norm,
                              grid_shift, coords, particle_type, density_grids);
         }
-
-        // For debug:
-        // for (int itype = 0; itype < 2; ++itype)
-        // {
-        //     for (int i = 0; i < maxsite_1d; ++i)
-        //     {
-        //         for (int j = 0; j < maxsite_1d; ++j)
-        //         {
-        //             for (int k = 0; k < maxsite_1d; ++k)
-        //             {
-        //                 printf("%f\n", density_grids[itype][i][j][k]);
-        //             }
-        //         }
-        //     }
-        // }
 
         // MC atom displacement move for each particle in the system
         for (int i = 0; i < natom_total; ++i)
         {
-            mc_atom_displ(i, bondlen, pm_type, &naccept, density_grids, density_A_ideal, density_B_ideal,
-                          particle_type, coords, atom_bond_list, box_size, grid_size, maxsite_1d, chi, kappa,
-                          density, kspring, natom_total, grid_shift, idum);
+            mc_atom_displ(i, bondlen, pm_type, &naccept, density_grids, density,
+                          particle_type, coords, atom_bond_list, box_size, grid_size, rho_norm, maxsite_1d, chi, kappa,
+                          kspring, natom_total, grid_shift, idum);
             nattempt += 1;
         }
-        // For debug:
-        // mc_atom_displ(0, 0.5 * bondlen, &naccept, density_grids, density_A_ideal, density_B_ideal,
-        //               particle_type, coords, atom_bond_list, box_size, grid_size, maxsite_1d, chi, kappa, density,
-        //               kspring, natom_total, grid_shift, idum);
-        // nattempt += 1;
+
         // save trajectory, thermo and density profile every so often
         if (t % save_every == 0)
         {
@@ -599,14 +561,6 @@ void initialize_polymer(long long int nchain, long long int natom_perchain, int 
         coords[index][2] = ran1(idum) * box_size;
         particle_type[index] = itype;
         molecule_id[index] = mol_start_idx + i + 1;
-        // For debug:
-        // printf("%d\t", index);
-        // printf("%d\t", particle_type[index]);
-        // printf("%d\t", molecule_id[index]);
-        // printf("%lf\t", coords[index][0]);
-        // printf("%lf\t", coords[index][1]);
-        // printf("%lf\t", coords[index][2]);
-        // printf("\n");
 
         // Randomizing positions of the rest beads within the chain spatially
         for (int j = 1; j < natom_perchain; ++j)
@@ -675,17 +629,12 @@ int metro_crit(double enrg_diff, long *idum)
 }
 
 // calculation of density profile of the meshgrids
-void get_mesh_density(long long int natom_total, double grid_size, int maxsite_1d, int pm_type,
-                      double density_A_ideal, double density_B_ideal,
+void get_mesh_density(long long int natom_total, double grid_size, int maxsite_1d, int pm_type, double rho_norm,
                       double grid_shift[3], double **coords, int *particle_type, double ****density_grids)
 {
     double rx, ry, rz;
     int xgrid, ygrid, zgrid;
     int atom_type;
-    double density_temp[2];
-
-    density_temp[0] = density_A_ideal;
-    density_temp[1] = density_B_ideal;
 
     // TODO: set the density grid to zero within the function
     // memset(density_grids, 0, 2 * maxsite_1d * maxsite_1d * maxsite_1d * sizeof(double));
@@ -706,7 +655,7 @@ void get_mesh_density(long long int natom_total, double grid_size, int maxsite_1
             zgrid = rz / grid_size + grid_shift[2];
             zgrid = zgrid % maxsite_1d;
             // taking the normalization factor into account
-            density_grids[atom_type][xgrid][ygrid][zgrid] += 1 / density_temp[atom_type];
+            density_grids[atom_type][xgrid][ygrid][zgrid] += 1 / rho_norm;
         }
     }
 
@@ -755,14 +704,14 @@ void get_mesh_density(long long int natom_total, double grid_size, int maxsite_1
             zneigh = zgrid + ((dz > 0) ? 1 : -1);
             zneigh = mod(zneigh, maxsite_1d);
             // taking the normalization factor into account
-            density_grids[atom_type][xgrid][ygrid][zgrid] += tx * ty * tz / density_temp[atom_type];
-            density_grids[atom_type][xneigh][ygrid][zgrid] += dx * ty * tz / density_temp[atom_type];
-            density_grids[atom_type][xgrid][yneigh][zgrid] += tx * dy * tz / density_temp[atom_type];
-            density_grids[atom_type][xgrid][ygrid][zneigh] += tx * ty * dz / density_temp[atom_type];
-            density_grids[atom_type][xneigh][yneigh][zgrid] += dx * dy * tz / density_temp[atom_type];
-            density_grids[atom_type][xneigh][ygrid][zneigh] += dx * ty * dz / density_temp[atom_type];
-            density_grids[atom_type][xgrid][yneigh][zneigh] += tx * dy * dz / density_temp[atom_type];
-            density_grids[atom_type][xneigh][yneigh][zneigh] += dx * dy * dz / density_temp[atom_type];
+            density_grids[atom_type][xgrid][ygrid][zgrid] += tx * ty * tz / rho_norm;
+            density_grids[atom_type][xneigh][ygrid][zgrid] += dx * ty * tz / rho_norm;
+            density_grids[atom_type][xgrid][yneigh][zgrid] += tx * dy * tz / rho_norm;
+            density_grids[atom_type][xgrid][ygrid][zneigh] += tx * ty * dz / rho_norm;
+            density_grids[atom_type][xneigh][yneigh][zgrid] += dx * dy * tz / rho_norm;
+            density_grids[atom_type][xneigh][ygrid][zneigh] += dx * ty * dz / rho_norm;
+            density_grids[atom_type][xgrid][yneigh][zneigh] += tx * dy * dz / rho_norm;
+            density_grids[atom_type][xneigh][yneigh][zneigh] += dx * dy * dz / rho_norm;
         }
     }
     // For debug:
@@ -873,9 +822,9 @@ double calc_atom_bond_energy_harmonic(double **coords, int **atom_bond_list, int
     return res;
 }
 
-void mc_atom_displ(int iatom, double displ, int pm_type, unsigned long long *naccept, double ****density_grids, double density_A_ideal, double density_B_ideal,
-                   int *particle_type, double **coords, int **atom_bond_list, double box_size, double grid_size,
-                   int maxsite_1d, double chi, double kappa, double density, double kspring, long long int natom_total,
+void mc_atom_displ(int iatom, double displ, int pm_type, unsigned long long *naccept, double ****density_grids, double density,
+                   int *particle_type, double **coords, int **atom_bond_list, double box_size, double grid_size, double rho_norm,
+                   int maxsite_1d, double chi, double kappa, double kspring, long long int natom_total,
                    double grid_shift[3], long *idum)
 {
     if (pm_type == 0)
@@ -944,15 +893,15 @@ void mc_atom_displ(int iatom, double displ, int pm_type, unsigned long long *nac
                              calc_singlemesh_energy(phiA_old_to, phiB_old_to, chi, kappa, density);
             if (atom_type == 0)
             {
-                phiA_new_from = phiA_old_from - 1 / density_A_ideal;
-                phiA_new_to = phiA_old_to + 1 / density_A_ideal;
+                phiA_new_from = phiA_old_from - 1 / rho_norm;
+                phiA_new_to = phiA_old_to + 1 / rho_norm;
                 phiB_new_from = phiB_old_from;
                 phiB_new_to = phiB_old_to;
             }
             else
             {
-                phiB_new_from = phiB_old_from - 1 / density_B_ideal;
-                phiB_new_to = phiB_old_to + 1 / density_B_ideal;
+                phiB_new_from = phiB_old_from - 1 / rho_norm;
+                phiB_new_to = phiB_old_to + 1 / rho_norm;
                 phiA_new_from = phiA_old_from;
                 phiA_new_to = phiA_old_to;
             }
@@ -973,6 +922,7 @@ void mc_atom_displ(int iatom, double displ, int pm_type, unsigned long long *nac
 
             // Use metropolis criteria to determine whether to accept the move
             iaccept = metro_crit(enrg_diff, idum);
+            // For debug:
             // printf("phiA_old_from = %lf, phiA_old_to = %lf\n", phiA_old_from, phiA_old_to);
             // printf("phiB_old_from = %lf, phiB_old_to = %lf\n", phiB_old_from, phiB_old_to);
             // printf("enrg_local_old = %lf, enrg_local_new = %lf\n, \t enrg_bond_old = %lf, enrg_bond_new = %lf\n, \t enrg_diff = %lf, accept = %d\n", enrg_local_old, enrg_local_new, enrg_bond_old, enrg_bond_new, enrg_diff, iaccept);
@@ -1014,9 +964,6 @@ void mc_atom_displ(int iatom, double displ, int pm_type, unsigned long long *nac
 
             // Use metropolis criteria to determine whether to accept the move
             iaccept = metro_crit(enrg_diff, idum);
-            // printf("phiA_old_from = %lf, phiA_old_to = %lf\n", phiA_old_from, phiA_old_to);
-            // printf("phiB_old_from = %lf, phiB_old_to = %lf\n", phiB_old_from, phiB_old_to);
-            // printf("enrg_local_old = %lf, enrg_local_new = %lf\n, \t enrg_bond_old = %lf, enrg_bond_new = %lf\n, \t enrg_diff = %lf, accept = %d\n", enrg_local_old, enrg_local_new, enrg_bond_old, enrg_bond_new, enrg_diff, iaccept);
             *naccept += iaccept;
             if (iaccept == 0)
             {
@@ -1029,74 +976,7 @@ void mc_atom_displ(int iatom, double displ, int pm_type, unsigned long long *nac
     }
     if (pm_type == 1)
     {
-        // double rx, ry, rz;
-        // int xgrid, ygrid, zgrid;
-        // int xgrid_new, ygrid_new, zgrid_new;
-        // int xneigh, yneigh, zneigh;
-        // int xneigh_new, yneigh_new, zneigh_new;
-        // int atom_type;
-        // double kappaN, pre_factor;
-        // double xc, yc, zc;
-        // double dx, dy, dz;
-        // double tx, ty, tz;
-
-        // atom_type = particle_type[iatom];
-        // double density_temp[2];
-        // density_temp[0] = density_A_ideal;
-        // density_temp[1] = density_B_ideal;
-
-        // rx = coords[iatom][0];
-        // ry = coords[iatom][1];
-        // rz = coords[iatom][2];
-        // // identify the grid that the particle is in and the corresponding grid center;
-        // // taking a grid shift into account
-        // xgrid = rx / grid_size + grid_shift[0];
-        // xc = ((double)xgrid + 0.5 - grid_shift[0]) * grid_size;
-        // xgrid = mod(xgrid, maxsite_1d);
-        // ygrid = ry / grid_size + grid_shift[1];
-        // yc = ((double)ygrid + 0.5 - grid_shift[1]) * grid_size;
-        // ygrid = mod(ygrid, maxsite_1d);
-        // zgrid = rz / grid_size + grid_shift[2];
-        // zc = ((double)zgrid + 0.5 - grid_shift[2]) * grid_size;
-        // zgrid = mod(zgrid, maxsite_1d);
-        // // the distance of particle w.r.t the center of the grid (NORMALIZED BY GRID SIZE!!!)
-        // dx = (rx - xc) / grid_size;
-        // dy = (ry - yc) / grid_size;
-        // dz = (rz - zc) / grid_size;
-        // tx = 1 - fabs(dx);
-        // ty = 1 - fabs(dy);
-        // tz = 1 - fabs(dz);
-        // // identify the neighbor grid that the particle is contributing density to
-        // xneigh = xgrid + ((dx > 0) ? 1 : -1);
-        // xneigh = mod(xneigh, maxsite_1d);
-        // yneigh = ygrid + ((dy > 0) ? 1 : -1);
-        // yneigh = mod(yneigh, maxsite_1d);
-        // zneigh = zgrid + ((dz > 0) ? 1 : -1);
-        // zneigh = mod(zneigh, maxsite_1d);
-        // // taking the normalization factor into account
-        // density_grids[atom_type][xgrid][ygrid][zgrid] += tx * ty * tz / density_temp[atom_type];
-        // density_grids[atom_type][xneigh][ygrid][zgrid] += dx * ty * tz / density_temp[atom_type];
-        // density_grids[atom_type][xgrid][yneigh][zgrid] += tx * dy * tz / density_temp[atom_type];
-        // density_grids[atom_type][xgrid][ygrid][zneigh] += tx * ty * dz / density_temp[atom_type];
-        // density_grids[atom_type][xneigh][yneigh][zgrid] += dx * dy * tz / density_temp[atom_type];
-        // density_grids[atom_type][xneigh][ygrid][zneigh] += dx * ty * dz / density_temp[atom_type];
-        // density_grids[atom_type][xgrid][yneigh][zneigh] += tx * dy * dz / density_temp[atom_type];
-        // density_grids[atom_type][xneigh][yneigh][zneigh] += dx * dy * dz / density_temp[atom_type];
-
-        // double theta, phi;
-        // double rx_new, ry_new, rz_new;
-        // int xgrid_new, ygrid_new, zgrid_new;
-        // // Randomly get theta angle(xy plane)
-        // theta = ran1(idum) * 2.0 * M_PI;
-        // // randomly get cos() value ranging from -1 to 1 to set 2Pi rotation angle from z axis
-        // phi = acos(2.0 * ran1(idum) - 1.0);
-        // // move the particle by a vector with length displ
-        // rx_new = rx + displ * cos(theta) * sin(phi);
-        // ry_new = ry + displ * sin(theta) * sin(phi);
-        // rz_new = rz + displ * cos(phi);
-        // // wrap around the periodic boundary condition
-        // rx_new = periodic(rx_new, box_size);
-        // ry_new = periodic(ry_new, box_size);
-        // rz_new = periodic(rz_new, box_size);
+        printf("No implementation of PM1 yet! Exiting the program....\n");
+        exit(0);
     }
 }
