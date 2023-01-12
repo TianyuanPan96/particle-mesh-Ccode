@@ -1,0 +1,16 @@
+Nbb = 100
+Nsc = 4
+natom_perchain = 500
+natom_total = 239500
+nbonds_total = 239021
+pm_type = 0
+density = 3.806961
+rho_norm = 29.937500
+bondlen = 1.000000
+chi = 0.100000
+kappa = 1.562500
+kspring = 1.500000
+box_size = 39.799497
+grid_size = 1.989975
+maxsite_1d = 20
+nsites = 8000

@@ -29,6 +29,9 @@ double dist_calc(double ra_x, double rb_x, double ra_y, double rb_y, double ra_z
 void initialize_polymer(long long int nchain, long long int natom_perchain, int itype, double bb, double box_size,
                         int start_idx, int mol_start_idx, int *particle_type, int *molecule_id,
                         double **coords, int **bonds, int **atom_bond_list, long *idum);
+void initialize_bottlebrush(long long int nchain, int itype, double bb, int Nbb, int Nsc, double box_size,
+                            int start_idx, int mol_start_idx, int *particle_type, int *molecule_id,
+                            double **coords, int **bonds, int **atom_bond_list, long *idum);
 int metro_crit(double enrg_diff, long *idum);
 void get_mesh_density(long long int natom_total, double grid_size, int maxsite_1d, int pm_type, double rho_norm,
                       double grid_shift[3], double **coords, int *particle_type, double ****density_grids);
@@ -213,6 +216,8 @@ int main(int argc, const char *argv[])
     mol_start_idx = nchain_A;
     initialize_polymer(nchain_B, natom_perchain, 1, bondlen_sqr, box_size, start_idx,
                        mol_start_idx, particle_type, molecule_id, coords, bonds, atom_bond_list, idum);
+    // initialize_bottlebrush(nchain, 0, bondlen_sqr, Nbb, Nsc, box_size, start_idx,
+    //                        mol_start_idx, particle_type, molecule_id, coords, bonds, atom_bond_list, idum);
 
     // Write the initial configuration to a file
     FILE *init_config;
@@ -423,15 +428,16 @@ int main(int argc, const char *argv[])
     fclose(thermo);
 }
 
+// get the mod between two integers (guarantee only positive number result)
 int mod(int a, int b)
 {
     int r = a % b;
     return r < 0 ? r + b : r;
 }
 
+// random number between 0 and 1
 float ran1(long *idum)
 {
-    // random number between 0 and 1
     int j;
     long k;
     static long idum2 = 123456789;
@@ -475,9 +481,9 @@ float ran1(long *idum)
         return temp;
 }
 
+// random number with normal distribution N(0,1)
 float gasdev(long *idum)
 {
-    // random number with normal distribution N(0,1)
     float ran1(long *idum);
     static int iset = 0;
     static float gset;
@@ -505,6 +511,7 @@ float gasdev(long *idum)
     }
 }
 
+// initialize random number seed
 long initRan()
 {
     time_t seconds;
@@ -512,6 +519,7 @@ long initRan()
     return -1 * (unsigned long)(seconds);
 }
 
+// calculate the position (scaler) due to periodic boundary condition
 double periodic(double ri, double bl)
 {
     if (ri < 0)
@@ -522,6 +530,7 @@ double periodic(double ri, double bl)
     return ri;
 }
 
+// distance calculation that accounts for periodic boundary condition
 double dist_calc(double ra_x, double rb_x, double ra_y, double rb_y, double ra_z, double rb_z, double bl)
 {
     double dpos[3], bl_half;
@@ -541,7 +550,8 @@ double dist_calc(double ra_x, double rb_x, double ra_y, double rb_y, double ra_z
 
     return sqrt(dpos[0] * dpos[0] + dpos[1] * dpos[1] + dpos[2] * dpos[2]);
 }
-// initialization of polymer
+
+// initialization of linear polymer
 void initialize_polymer(long long int nchain, long long int natom_perchain, int itype, double bb, double box_size,
                         int start_idx, int mol_start_idx, int *particle_type, int *molecule_id,
                         double **coords, int **bonds, int **atom_bond_list, long *idum)
@@ -607,6 +617,106 @@ void initialize_polymer(long long int nchain, long long int natom_perchain, int 
     }     // done initialization
 }
 
+// initialization of bottlebrush polymers
+void initialize_bottlebrush(long long int nchain, int itype, double bb, int Nbb, int Nsc, double box_size,
+                            int start_idx, int mol_start_idx, int *particle_type, int *molecule_id,
+                            double **coords, int **bonds, int **atom_bond_list, long *idum)
+{
+    double theta, phi;
+    int index, start_thischain;
+    double b = sqrt(bb);
+    int ibond;
+    int natom_perchain;
+    ibond = start_idx - mol_start_idx;
+    natom_perchain = Nbb * (Nsc + 1);
+    for (int i = 0; i < nchain; ++i)
+    {
+        // Randomizing positions/locations of the first bead(=index 0, 1N, 2N-th...) of each polymer
+        start_thischain = start_idx + i * natom_perchain;
+        index = start_thischain;
+        coords[index][0] = ran1(idum) * box_size;
+        coords[index][1] = ran1(idum) * box_size;
+        coords[index][2] = ran1(idum) * box_size;
+        particle_type[index] = itype;
+        molecule_id[index] = mol_start_idx + i + 1;
+
+        // Create the backbone first
+        for (int j = 1; j < Nbb; ++j)
+        {
+            // from index 1(=2nd bead of each chain)
+            index = start_thischain + j;
+            // assign the atom type
+            particle_type[index] = itype;
+            // assign the molecule ID
+            molecule_id[index] = mol_start_idx + i + 1;
+            // create an entry for a bond
+            bonds[ibond][0] = index - 1;
+            bonds[ibond][1] = index;
+            ibond += 1;
+            // Add the bond info to both atom[index] and atom[index-1]
+            atom_bond_list[index][0] = index - 1;
+            atom_bond_list[index - 1][1] = index;
+            // Randomly get theta angle(xy plane)
+            theta = ran1(idum) * 2.0 * M_PI;
+            // randomly get cos() value ranging from -1 to 1 to set 2Pi rotation angle from z axis
+            phi = acos(2.0 * ran1(idum) - 1.0);
+            // move this much in x direction relative to previous bead
+            coords[index][0] = coords[index - 1][0] + b * cos(theta) * sin(phi);
+            // move this much in y direction relative to previous bead
+            coords[index][1] = coords[index - 1][1] + b * sin(theta) * sin(phi);
+            // move this much in z direction relative to previous bead
+            coords[index][2] = coords[index - 1][2] + b * cos(phi);
+
+            // If our new chain goes outside of the periodic box, we wrap around to the other side of the box
+            coords[index][0] = periodic(coords[index][0], box_size);
+            coords[index][1] = periodic(coords[index][1], box_size);
+            coords[index][2] = periodic(coords[index][2], box_size);
+        }
+
+        // then for each backbone bead, attach a side-chain to it
+        for (int ibb = 0; ibb < Nbb; ++ibb)
+        {
+            index = start_thischain + Nbb + ibb * Nsc;
+            particle_type[index] = itype;
+            molecule_id[index] = mol_start_idx + i + 1;
+            bonds[ibond][0] = start_thischain + ibb;
+            bonds[ibond][1] = index;
+            ibond += 1;
+            atom_bond_list[index][0] = start_thischain + ibb;
+            atom_bond_list[index - 1][1] = index;
+            theta = ran1(idum) * 2.0 * M_PI;
+            phi = acos(2.0 * ran1(idum) - 1.0);
+            coords[index][0] = coords[index - 1][0] + b * cos(theta) * sin(phi);
+            coords[index][1] = coords[index - 1][1] + b * sin(theta) * sin(phi);
+            coords[index][2] = coords[index - 1][2] + b * cos(phi);
+            coords[index][0] = periodic(coords[index][0], box_size);
+            coords[index][1] = periodic(coords[index][1], box_size);
+            coords[index][2] = periodic(coords[index][2], box_size);
+
+            for (int k = 1; k < Nsc; ++k)
+            {
+                index = start_thischain + Nbb + ibb * Nsc + k;
+                particle_type[index] = itype;
+                molecule_id[index] = mol_start_idx + i + 1;
+                bonds[ibond][0] = index - 1;
+                bonds[ibond][1] = index;
+                ibond += 1;
+                atom_bond_list[index][0] = index - 1;
+                atom_bond_list[index - 1][1] = index;
+                theta = ran1(idum) * 2.0 * M_PI;
+                phi = acos(2.0 * ran1(idum) - 1.0);
+                coords[index][0] = coords[index - 1][0] + b * cos(theta) * sin(phi);
+                coords[index][1] = coords[index - 1][1] + b * sin(theta) * sin(phi);
+                coords[index][2] = coords[index - 1][2] + b * cos(phi);
+                coords[index][0] = periodic(coords[index][0], box_size);
+                coords[index][1] = periodic(coords[index][1], box_size);
+                coords[index][2] = periodic(coords[index][2], box_size);
+            }
+        }
+    }
+}
+
+// metropolis criteria determination of monte carlo moves
 int metro_crit(double enrg_diff, long *idum)
 {
     int res = 0;
@@ -734,6 +844,7 @@ void get_mesh_density(long long int natom_total, double grid_size, int maxsite_1
     }
 }
 
+// calculate the entire mesh energy using the formula
 double calc_total_particlemesh_energy(double ****density_grids, double chi, double kappa,
                                       double density, int maxsite_1d)
 {
@@ -759,6 +870,7 @@ double calc_total_particlemesh_energy(double ****density_grids, double chi, doub
     return enrg_pm;
 }
 
+// calculate a single mesh's energy
 double calc_singlemesh_energy(double phiA, double phiB, double chi, double kappa, double density)
 {
     double res;
@@ -766,6 +878,7 @@ double calc_singlemesh_energy(double phiA, double phiB, double chi, double kappa
     return res;
 }
 
+// calculate all bonds energy
 double calc_total_bond_energy_harmonic(double **coords, int **bonds, int nbonds_total,
                                        double kspring, double box_size)
 {
@@ -791,6 +904,7 @@ double calc_total_bond_energy_harmonic(double **coords, int **bonds, int nbonds_
     return res;
 }
 
+// calculate the bond energy connected to a given atom using atom_bond_list
 double calc_atom_bond_energy_harmonic(double **coords, int **atom_bond_list, int iatom,
                                       double kspring, double box_size)
 {
@@ -822,6 +936,7 @@ double calc_atom_bond_energy_harmonic(double **coords, int **atom_bond_list, int
     return res;
 }
 
+// monte carlo move for a single atom displacement
 void mc_atom_displ(int iatom, double displ, int pm_type, unsigned long long *naccept, double ****density_grids, double density,
                    int *particle_type, double **coords, int **atom_bond_list, double box_size, double grid_size, double rho_norm,
                    int maxsite_1d, double chi, double kappa, double kspring, long long int natom_total,
