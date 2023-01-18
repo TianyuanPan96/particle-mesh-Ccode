@@ -426,6 +426,35 @@ int main(int argc, const char *argv[])
 
     fclose(traj);
     fclose(thermo);
+
+    // Write the final configuration to a file
+    FILE *final_config;
+    final_config = fopen("final.cfg", "w");
+    fprintf(final_config, "#Final configuration\n");
+    fprintf(final_config, "%lld atoms\n", natom_total);
+    fprintf(final_config, "2 atom types\n");
+    fprintf(final_config, "%d bonds\n", nbonds_total);
+    fprintf(final_config, "1 bond types\n");
+    fprintf(final_config, "0.0 %lf xlo xhi\n", box_size);
+    fprintf(final_config, "0.0 %lf ylo yhi\n", box_size);
+    fprintf(final_config, "0.0 %lf zlo zhi\n", box_size);
+    fprintf(final_config, "0 0 0 xy xz yz\n");
+    fprintf(final_config, "\n");
+    fprintf(final_config, "Atoms # bond\n");
+    fprintf(final_config, "\n");
+    for (int i = 0; i < natom_total; ++i)
+    {
+        fprintf(final_config, "%d %d %d %f %f %f\n", i + 1, molecule_id[i], particle_type[i] + 1,
+                coords[i][0], coords[i][1], coords[i][2]);
+    }
+    fprintf(final_config, "\n");
+    fprintf(final_config, "Bonds\n");
+    fprintf(final_config, "\n");
+    for (int i = 0; i < nbonds_total; ++i)
+    {
+        fprintf(final_config, "%d 1 %d %d\n", i + 1, bonds[i][0] + 1, bonds[i][1] + 1);
+    }
+    fclose(final_config);
 }
 
 // get the mod between two integers (guarantee only positive number result)
