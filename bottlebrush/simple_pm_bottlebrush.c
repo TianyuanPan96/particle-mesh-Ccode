@@ -29,7 +29,7 @@ double dist_calc(double ra_x, double rb_x, double ra_y, double rb_y, double ra_z
 void initialize_polymer(long long int nchain, long long int natom_perchain, int itype, double bb, double box_size,
                         int start_idx, int mol_start_idx, int *particle_type, int *molecule_id,
                         double **coords, int **bonds, int **atom_bond_list, long *idum);
-void initialize_bottlebrush(long long int nchain, int itype, double bb, int Nbb, int Nsc, double box_size,
+void initialize_bottlebrush(long long int nchain, int itype, double bb, int Nbb, int Nsc, int f_branch, double box_size,
                             int start_idx, int mol_start_idx, int *particle_type, int *molecule_id,
                             double **coords, int **bonds, int **atom_bond_list, long *idum);
 int metro_crit(double enrg_diff, long *idum);
@@ -42,6 +42,7 @@ double calc_total_bond_energy_harmonic(double **coords, int **bonds, int nbonds_
                                        double kspring, double box_size);
 double calc_atom_bond_energy_harmonic(double **coords, int **atom_bond_list, int iatom,
                                       double kspring, double box_size);
+double calc_ave_bondlen(double **coords, int **bonds, int nbonds_total, double box_size);
 void mc_atom_displ(int iatom, double displ, int pm_type, unsigned long long *naccept, double ****density_grids, double density,
                    int *particle_type, double **coords, int **atom_bond_list, double box_size, double grid_size, double rho_norm,
                    int maxsite_1d, double chi, double kappa, double kspring, long long int natom_total,
@@ -49,7 +50,7 @@ void mc_atom_displ(int iatom, double displ, int pm_type, unsigned long long *nac
 
 int main(int argc, const char *argv[])
 {
-    long long int natom_perchain, natom_total, natom_A, natom_B, Nbb, Nsc;
+    long long int natom_perchain, natom_total, natom_A, natom_B, Nbb, Nsc, f_branch;
     long long int nchain, nchain_A, nchain_B;
     int nbonds_perchain, nbonds_total;
 
@@ -60,6 +61,7 @@ int main(int argc, const char *argv[])
     int maxsite_1d;
 
     int save_every, tot_mc_cycles, equil_cycles, grid_shift_every;
+    double ave_bondlen;
 
     time_t start_t, current_t;
     double diff_t;
@@ -73,8 +75,9 @@ int main(int argc, const char *argv[])
     // fscanf(inputfile, "nchain_A = %d\n", &nchain_A);             // # of A polymers
     // fscanf(inputfile, "nchain_B = %d\n", &nchain_B);             // # of B polymers
 
-    fscanf(inputfile, "Nbb = %lld\n", &Nbb); // # of backbone atoms per chain
-    fscanf(inputfile, "Nsc = %lld\n", &Nsc); // # of backbone atoms per chain
+    fscanf(inputfile, "Nbb = %lld\n", &Nbb);           // # of backbone atoms per chain
+    fscanf(inputfile, "Nsc = %lld\n", &Nsc);           // # of backbone atoms per chain
+    fscanf(inputfile, "f_branch = %lld\n", &f_branch); // # of backbone atoms per chain
     // fscanf(inputfile, "f_A = %lf\n", &f_A);                        // mol fraction of A
     fscanf(inputfile, "pm_type = %d\n", &pm_type);  // PM type (0- or 1-order)
     fscanf(inputfile, "bondlen = %lf\n", &bondlen); // bond length           // End-to-end distance for a polymer
@@ -105,7 +108,7 @@ int main(int argc, const char *argv[])
 
     int nsites;
     bondlen_sqr = bondlen * bondlen;
-    natom_perchain = Nbb * (Nsc + 1);
+    natom_perchain = Nbb * (f_branch * Nsc + 1);
     nbonds_perchain = natom_perchain - 1; // # of bonds per chain
     double Re, ReReRe;
     Re = sqrt((Nbb - 1) * bondlen_sqr);
@@ -140,6 +143,7 @@ int main(int argc, const char *argv[])
     // fprintf(outputfile, "nchain_B = %lld\n", nchain_B);
     fprintf(outputfile, "Nbb = %lld\n", Nbb);
     fprintf(outputfile, "Nsc = %lld\n", Nsc);
+    fprintf(outputfile, "f_branch = %lld\n", f_branch);
     fprintf(outputfile, "natom_perchain = %lld\n", natom_perchain);
     fprintf(outputfile, "natom_total = %lld\n", natom_total);
     fprintf(outputfile, "nbonds_total = %d\n", nbonds_total);
@@ -182,14 +186,14 @@ int main(int argc, const char *argv[])
     atom_bond_list = (int **)calloc(natom_total, sizeof(int *));
     for (int i = 0; i < natom_total; ++i)
     {
-        // Assuming maximum 4 bonds per atom!!!
-        atom_bond_list[i] = (int *)calloc(4, sizeof(int));
+        // Assuming maximum 10 bonds per atom!!!
+        atom_bond_list[i] = (int *)calloc(10, sizeof(int));
     }
     // Then initialize this list to -1 to make sure check can be performed
     for (int i = 0; i < natom_total; ++i)
     {
-        // Assuming maximum 4 bonds per atom!!!
-        for (int j = 0; j < 4; ++j)
+        // Assuming maximum 10 bonds per atom!!!
+        for (int j = 0; j < 10; ++j)
         {
             atom_bond_list[i][j] = -1;
         }
@@ -216,7 +220,7 @@ int main(int argc, const char *argv[])
     // Initialize polymers
     int start_idx = 0;
     int mol_start_idx = 0;
-    initialize_bottlebrush(nchain, 0, bondlen_sqr, Nbb, Nsc, box_size, start_idx,
+    initialize_bottlebrush(nchain, 0, bondlen_sqr, Nbb, Nsc, f_branch, box_size, start_idx,
                            mol_start_idx, particle_type, molecule_id, coords, bonds, atom_bond_list, idum);
 
     // Write the initial configuration to a file
@@ -265,15 +269,15 @@ int main(int argc, const char *argv[])
     double mesh_energy, bond_energy, total_energy;
     FILE *thermo;
     char *thermo_filename = malloc(sizeof(char) * 30);
-    sprintf(thermo_filename, "thermo_N%lld_A%lld_B%lld.txt", natom_perchain, nchain_A, nchain_B);
+    sprintf(thermo_filename, "thermo_Nbb%lld_Nsc%lld_f%lld.txt", Nbb, Nsc, f_branch);
     thermo = fopen(thermo_filename, "w");
-    fprintf(thermo, "t\tmesh_energy\tbond_energy\ttotal_energy\tacceptance_rate\n");
+    fprintf(thermo, "t\tmesh_energy\tbond_energy\ttotal_energy\tacceptance_rate\tave_bondlen\n");
     fclose(thermo);
 
     // Write the density info to a file
     FILE *density_profile;
     char *density_filename = malloc(sizeof(char) * 30);
-    sprintf(density_filename, "dens_profile_N%lld_A%lld_B%lld.txt", natom_perchain, nchain_A, nchain_B);
+    sprintf(density_filename, "dens_profile_Nbb%lld_Nsc%lld_f%lld.txt", Nbb, Nsc, f_branch);
     density_profile = fopen(density_filename, "w");
     fprintf(density_profile, "type\tx\ty\tz\tdensity\n");
     fclose(density_profile);
@@ -323,7 +327,8 @@ int main(int argc, const char *argv[])
             mesh_energy = calc_total_particlemesh_energy(density_grids, chi, kappa, density, maxsite_1d);
             bond_energy = calc_total_bond_energy_harmonic(coords, bonds, nbonds_total, kspring, box_size);
             total_energy = mesh_energy + bond_energy;
-            fprintf(thermo, "%llu\t%lf\t%lf\t%lf\t%lf\n", t, mesh_energy, bond_energy, total_energy, acc_rate);
+            ave_bondlen = calc_ave_bondlen(coords, bonds, nbonds_total, box_size);
+            fprintf(thermo, "%llu\t%lf\t%lf\t%lf\t%lf\t%lf\n", t, mesh_energy, bond_energy, total_energy, acc_rate, ave_bondlen);
         }
     }
 
@@ -405,7 +410,7 @@ int main(int argc, const char *argv[])
             mesh_energy = calc_total_particlemesh_energy(density_grids, chi, kappa, density, maxsite_1d);
             bond_energy = calc_total_bond_energy_harmonic(coords, bonds, nbonds_total, kspring, box_size);
             total_energy = mesh_energy + bond_energy;
-            fprintf(thermo, "%llu\t%lf\t%lf\t%lf\t%lf\n", t, mesh_energy, bond_energy, total_energy, acc_rate);
+            ave_bondlen = calc_ave_bondlen(coords, bonds, nbonds_total, box_size);
             // density profile
             fprintf(density_profile, "t = %llu\n", t);
             for (int itype = 0; itype < 2; ++itype)
@@ -426,6 +431,35 @@ int main(int argc, const char *argv[])
 
     fclose(traj);
     fclose(thermo);
+
+    // Write the final configuration to a file
+    FILE *final_config;
+    final_config = fopen("final.cfg", "w");
+    fprintf(final_config, "#Final configuration\n");
+    fprintf(final_config, "%lld atoms\n", natom_total);
+    fprintf(final_config, "2 atom types\n");
+    fprintf(final_config, "%d bonds\n", nbonds_total);
+    fprintf(final_config, "1 bond types\n");
+    fprintf(final_config, "0.0 %lf xlo xhi\n", box_size);
+    fprintf(final_config, "0.0 %lf ylo yhi\n", box_size);
+    fprintf(final_config, "0.0 %lf zlo zhi\n", box_size);
+    fprintf(final_config, "0 0 0 xy xz yz\n");
+    fprintf(final_config, "\n");
+    fprintf(final_config, "Atoms # bond\n");
+    fprintf(final_config, "\n");
+    for (int i = 0; i < natom_total; ++i)
+    {
+        fprintf(final_config, "%d %d %d %f %f %f\n", i + 1, molecule_id[i], particle_type[i] + 1,
+                coords[i][0], coords[i][1], coords[i][2]);
+    }
+    fprintf(final_config, "\n");
+    fprintf(final_config, "Bonds\n");
+    fprintf(final_config, "\n");
+    for (int i = 0; i < nbonds_total; ++i)
+    {
+        fprintf(final_config, "%d 1 %d %d\n", i + 1, bonds[i][0] + 1, bonds[i][1] + 1);
+    }
+    fclose(final_config);
 }
 
 // get the mod between two integers (guarantee only positive number result)
@@ -618,7 +652,7 @@ void initialize_polymer(long long int nchain, long long int natom_perchain, int 
 }
 
 // initialization of bottlebrush polymers
-void initialize_bottlebrush(long long int nchain, int itype, double bb, int Nbb, int Nsc, double box_size,
+void initialize_bottlebrush(long long int nchain, int itype, double bb, int Nbb, int Nsc, int f_branch, double box_size,
                             int start_idx, int mol_start_idx, int *particle_type, int *molecule_id,
                             double **coords, int **bonds, int **atom_bond_list, long *idum)
 {
@@ -628,7 +662,7 @@ void initialize_bottlebrush(long long int nchain, int itype, double bb, int Nbb,
     int ibond;
     int natom_perchain;
     ibond = start_idx - mol_start_idx;
-    natom_perchain = Nbb * (Nsc + 1);
+    natom_perchain = Nbb * (f_branch * Nsc + 1);
     for (int i = 0; i < nchain; ++i)
     {
         // Randomizing positions/locations of the first bead(=index 0, 1N, 2N-th...) of each polymer
@@ -673,44 +707,47 @@ void initialize_bottlebrush(long long int nchain, int itype, double bb, int Nbb,
             coords[index][2] = periodic(coords[index][2], box_size);
         }
 
-        // then for each backbone bead, attach a side-chain to it
+        // then for each backbone bead, attach f side-chains to it
         for (int ibb = 0; ibb < Nbb; ++ibb)
         {
-            index = start_thischain + Nbb + ibb * Nsc;
-            particle_type[index] = itype;
-            molecule_id[index] = mol_start_idx + i + 1;
-            bonds[ibond][0] = start_thischain + ibb;
-            bonds[ibond][1] = index;
-            ibond += 1;
-            atom_bond_list[index][0] = start_thischain + ibb;
-            atom_bond_list[start_thischain + ibb][2] = index;
-            theta = ran1(idum) * 2.0 * M_PI;
-            phi = acos(2.0 * ran1(idum) - 1.0);
-            coords[index][0] = coords[start_thischain + ibb][0] + b * cos(theta) * sin(phi);
-            coords[index][1] = coords[start_thischain + ibb][1] + b * sin(theta) * sin(phi);
-            coords[index][2] = coords[start_thischain + ibb][2] + b * cos(phi);
-            coords[index][0] = periodic(coords[index][0], box_size);
-            coords[index][1] = periodic(coords[index][1], box_size);
-            coords[index][2] = periodic(coords[index][2], box_size);
-
-            for (int k = 1; k < Nsc; ++k)
+            for (int i_branch = 0; i_branch < f_branch; ++i_branch)
             {
-                index = start_thischain + Nbb + ibb * Nsc + k;
+                index += 1;
                 particle_type[index] = itype;
                 molecule_id[index] = mol_start_idx + i + 1;
-                bonds[ibond][0] = index - 1;
+                bonds[ibond][0] = start_thischain + ibb;
                 bonds[ibond][1] = index;
                 ibond += 1;
-                atom_bond_list[index][0] = index - 1;
-                atom_bond_list[index - 1][1] = index;
+                atom_bond_list[index][0] = start_thischain + ibb;
+                atom_bond_list[start_thischain + ibb][i_branch + 2] = index;
                 theta = ran1(idum) * 2.0 * M_PI;
                 phi = acos(2.0 * ran1(idum) - 1.0);
-                coords[index][0] = coords[index - 1][0] + b * cos(theta) * sin(phi);
-                coords[index][1] = coords[index - 1][1] + b * sin(theta) * sin(phi);
-                coords[index][2] = coords[index - 1][2] + b * cos(phi);
+                coords[index][0] = coords[start_thischain + ibb][0] + b * cos(theta) * sin(phi);
+                coords[index][1] = coords[start_thischain + ibb][1] + b * sin(theta) * sin(phi);
+                coords[index][2] = coords[start_thischain + ibb][2] + b * cos(phi);
                 coords[index][0] = periodic(coords[index][0], box_size);
                 coords[index][1] = periodic(coords[index][1], box_size);
                 coords[index][2] = periodic(coords[index][2], box_size);
+
+                for (int k = 1; k < Nsc; ++k)
+                {
+                    index += 1;
+                    particle_type[index] = itype;
+                    molecule_id[index] = mol_start_idx + i + 1;
+                    bonds[ibond][0] = index - 1;
+                    bonds[ibond][1] = index;
+                    ibond += 1;
+                    atom_bond_list[index][0] = index - 1;
+                    atom_bond_list[index - 1][1] = index;
+                    theta = ran1(idum) * 2.0 * M_PI;
+                    phi = acos(2.0 * ran1(idum) - 1.0);
+                    coords[index][0] = coords[index - 1][0] + b * cos(theta) * sin(phi);
+                    coords[index][1] = coords[index - 1][1] + b * sin(theta) * sin(phi);
+                    coords[index][2] = coords[index - 1][2] + b * cos(phi);
+                    coords[index][0] = periodic(coords[index][0], box_size);
+                    coords[index][1] = periodic(coords[index][1], box_size);
+                    coords[index][2] = periodic(coords[index][2], box_size);
+                }
             }
         }
     }
@@ -904,6 +941,32 @@ double calc_total_bond_energy_harmonic(double **coords, int **bonds, int nbonds_
     return res;
 }
 
+// calculate average bond length
+double calc_ave_bondlen(double **coords, int **bonds, int nbonds_total, double box_size)
+{
+    double res = 0;
+    double rx1, ry1, rz1;
+    double rx2, ry2, rz2;
+    int i, iatm1, iatm2;
+    double dist;
+    for (i = 0; i < nbonds_total; ++i)
+    {
+        iatm1 = bonds[i][0];
+        iatm2 = bonds[i][1];
+        rx1 = coords[iatm1][0];
+        ry1 = coords[iatm1][1];
+        rz1 = coords[iatm1][2];
+        rx2 = coords[iatm2][0];
+        ry2 = coords[iatm2][1];
+        rz2 = coords[iatm2][2];
+        dist = dist_calc(rx1, rx2, ry1, ry2, rz1, rz2, box_size);
+
+        res += dist;
+    }
+    res /= nbonds_total;
+    return res;
+}
+
 // calculate the bond energy connected to a given atom using atom_bond_list
 double calc_atom_bond_energy_harmonic(double **coords, int **atom_bond_list, int iatom,
                                       double kspring, double box_size)
@@ -917,7 +980,8 @@ double calc_atom_bond_energy_harmonic(double **coords, int **atom_bond_list, int
     rx1 = coords[iatom][0];
     ry1 = coords[iatom][1];
     rz1 = coords[iatom][2];
-    for (int j = 0; j < 4; ++j)
+    // assuming maximum 10 bonds per atom!!
+    for (int j = 0; j < 10; ++j)
     {
         atm_j = atom_bond_list[iatom][j];
         // check if the index is -1 (meaning nothing recorded),
