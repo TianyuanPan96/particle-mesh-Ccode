@@ -1,3 +1,5 @@
 traj*.txt
 thermo*.txt
 dens*.txt
+*.out
+*.cfg
