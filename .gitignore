@@ -3,3 +3,5 @@ thermo*.txt
 dens*.txt
 *.out
 *.cfg
+obj/
+*.o

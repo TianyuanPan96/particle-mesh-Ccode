@@ -1,0 +1,14 @@
+Nbb = 20
+Nsc = 3
+f_branch = 2
+pm_type = 0
+bondlen = 1.0
+chi = 0.1
+kappa = 1.5625
+kspring = 1.5
+grid_size(Re) = 0.2
+maxsite_1d = 20
+save_every = 10
+tot_mc_cycles = 100
+equil_cycles = 10
+grid_shift_every = 1
