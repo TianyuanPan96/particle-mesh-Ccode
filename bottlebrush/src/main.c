@@ -13,7 +13,7 @@ int main(int argc, const char *argv[])
     int maxsite_1d;
 
     int save_every, tot_mc_cycles, equil_cycles, grid_shift_every;
-    double ave_bondlen;
+    double ave_bondlen, reedsq_bb, reedsq_sc, rgsq_bb;
 
     time_t start_t, current_t;
     double diff_t;
@@ -223,7 +223,7 @@ int main(int argc, const char *argv[])
     char *thermo_filename = malloc(sizeof(char) * FILENAME_MAX);
     sprintf(thermo_filename, "thermo_Nbb%lld_Nsc%lld_f%lld.txt", Nbb, Nsc, f_branch);
     thermo = fopen(thermo_filename, "w");
-    fprintf(thermo, "t\tmesh_energy\tbond_energy\ttotal_energy\tacceptance_rate\tave_bondlen\n");
+    fprintf(thermo, "t\tmesh_energy\tbond_energy\ttotal_energy\tacceptance_rate\tave_bondlen\treedsq_bb\treed_sc\trgsq_bb\n");
     fclose(thermo);
 
     // Write the density info to a file
@@ -280,7 +280,11 @@ int main(int argc, const char *argv[])
             bond_energy = calc_total_bond_energy_harmonic(coords, bonds, nbonds_total, kspring, box_size);
             total_energy = mesh_energy + bond_energy;
             ave_bondlen = calc_ave_bondlen(coords, bonds, nbonds_total, box_size);
-            fprintf(thermo, "%llu\t%lf\t%lf\t%lf\t%lf\t%lf\n", t, mesh_energy, bond_energy, total_energy, acc_rate, ave_bondlen);
+            reedsq_bb = calc_reedsq_bb(coords, Nbb, nchain, natom_perchain, box_size);
+            reedsq_sc = calc_reedsq_sc(coords, Nbb, Nsc, f_branch, nchain, box_size);
+            rgsq_bb = calc_rgsq_bb(coords, Nbb, nchain, natom_perchain, box_size);
+            fprintf(thermo, "%llu\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n", t, mesh_energy, bond_energy, total_energy, acc_rate,
+                    ave_bondlen, reedsq_bb, reedsq_sc, rgsq_bb);
         }
     }
 
@@ -302,7 +306,7 @@ int main(int argc, const char *argv[])
     // Write the initial configuration to xyz file
     FILE *traj;
     char *traj_name = malloc(sizeof(char) * FILENAME_MAX);
-    sprintf(traj_name, "traj_N%lld_A%lld_B%lld.xyz", natom_perchain, nchain_A, nchain_B);
+    sprintf(traj_name, "traj_Nbb%lld_Nsc%lld_f%lld.xyz", Nbb, Nsc, f_branch);
     traj = fopen(traj_name, "w");
     // fprintf(traj, "#trajectory file\n");
     fclose(traj);
@@ -363,6 +367,12 @@ int main(int argc, const char *argv[])
             bond_energy = calc_total_bond_energy_harmonic(coords, bonds, nbonds_total, kspring, box_size);
             total_energy = mesh_energy + bond_energy;
             ave_bondlen = calc_ave_bondlen(coords, bonds, nbonds_total, box_size);
+            reedsq_bb = calc_reedsq_bb(coords, Nbb, nchain, natom_perchain, box_size);
+            reedsq_sc = calc_reedsq_sc(coords, Nbb, Nsc, f_branch, nchain, box_size);
+            rgsq_bb = calc_rgsq_bb(coords, Nbb, nchain, natom_perchain, box_size);
+            fprintf(thermo, "%llu\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n", t, mesh_energy, bond_energy, total_energy, acc_rate,
+                    ave_bondlen, reedsq_bb, reedsq_sc, rgsq_bb);
+
             // density profile
             fprintf(density_profile, "t = %llu\n", t);
             for (int itype = 0; itype < 2; ++itype)

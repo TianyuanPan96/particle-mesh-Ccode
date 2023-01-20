@@ -28,6 +28,8 @@ float gasdev(long *idum);
 long initRan();
 double periodic(double ri, double bl);
 double dist_calc(double ra_x, double rb_x, double ra_y, double rb_y, double ra_z, double rb_z, double bl);
+double dist_sq_calc(double ra_x, double rb_x, double ra_y, double rb_y, double ra_z, double rb_z, double bl);
+double simbox_1dgetimage(double rx, double bl);
 
 void initialize_polymer(long long int nchain, long long int natom_perchain, int itype, double bb, double box_size,
                         int start_idx, int mol_start_idx, int *particle_type, int *molecule_id,
@@ -50,5 +52,8 @@ void mc_atom_displ(int iatom, double displ, int pm_type, unsigned long long *nac
                    int *particle_type, double **coords, int **atom_bond_list, double box_size, double grid_size, double rho_norm,
                    int maxsite_1d, double chi, double kappa, double kspring, long long int natom_total,
                    double grid_shift[3], long *idum);
+double calc_reedsq_bb(double **coords, int Nbb, int nchain, int natom_perchain, double box_size);
+double calc_reedsq_sc(double **coords, int Nbb, int Nsc, int f_branch, int nchain, double box_size);
+double calc_rgsq_bb(double **coords, int Nbb, int nchain, int natom_perchain, double box_size);
 
 #endif

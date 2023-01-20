@@ -24,7 +24,7 @@ $(ODIR)/%.o: src/%.c $(DEPS)
 
 pm: $(OBJ)
 	$(CC) -o $(EXECUTABLE) $^ $(CFLAGS)
-	if [ -e "$(EXECUTABLE)" ]; then mv $(EXECUTABLE) $(INSTALL_DIR);fi 
+	if [ -e "$(EXECUTABLE)" ]; then mv $(EXECUTABLE) $(INSTALL_DIR)/.;fi 
 
 .PHONY: clean
 
