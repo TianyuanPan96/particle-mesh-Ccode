@@ -13,7 +13,7 @@ int main(int argc, const char *argv[])
     int maxsite_1d;
 
     int save_every, tot_mc_cycles, equil_cycles, grid_shift_every;
-    double ave_bondlen, reedsq_bb, reedsq_sc, rgsq_bb;
+    double ave_bondlen, reedsq_bb, reedsq_sc, rgsq_bb, rgsq_sc;
 
     time_t start_t, current_t;
     double diff_t;
@@ -223,7 +223,7 @@ int main(int argc, const char *argv[])
     char *thermo_filename = malloc(sizeof(char) * FILENAME_MAX);
     sprintf(thermo_filename, "thermo_Nbb%lld_Nsc%lld_f%lld.txt", Nbb, Nsc, f_branch);
     thermo = fopen(thermo_filename, "w");
-    fprintf(thermo, "t\tmesh_energy\tbond_energy\ttotal_energy\tacceptance_rate\tave_bondlen\treedsq_bb\treed_sc\trgsq_bb\n");
+    fprintf(thermo, "t\tmesh_energy\tbond_energy\ttotal_energy\tacceptance_rate\tave_bondlen\treedsq_bb\treed_sc\trgsq_bb\trgsq_sc\n");
     fclose(thermo);
 
     // Write the density info to a file
@@ -283,8 +283,9 @@ int main(int argc, const char *argv[])
             reedsq_bb = calc_reedsq_bb(coords, Nbb, nchain, natom_perchain, box_size);
             reedsq_sc = calc_reedsq_sc(coords, Nbb, Nsc, f_branch, nchain, box_size);
             rgsq_bb = calc_rgsq_bb(coords, Nbb, nchain, natom_perchain, box_size);
-            fprintf(thermo, "%llu\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n", t, mesh_energy, bond_energy, total_energy, acc_rate,
-                    ave_bondlen, reedsq_bb, reedsq_sc, rgsq_bb);
+            rgsq_sc = calc_rgsq_sc(coords, Nbb, Nsc, f_branch, nchain, box_size);
+            fprintf(thermo, "%llu\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n", t, mesh_energy, bond_energy, total_energy, acc_rate,
+                    ave_bondlen, reedsq_bb, reedsq_sc, rgsq_bb, rgsq_sc);
         }
     }
 
@@ -370,8 +371,9 @@ int main(int argc, const char *argv[])
             reedsq_bb = calc_reedsq_bb(coords, Nbb, nchain, natom_perchain, box_size);
             reedsq_sc = calc_reedsq_sc(coords, Nbb, Nsc, f_branch, nchain, box_size);
             rgsq_bb = calc_rgsq_bb(coords, Nbb, nchain, natom_perchain, box_size);
-            fprintf(thermo, "%llu\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n", t, mesh_energy, bond_energy, total_energy, acc_rate,
-                    ave_bondlen, reedsq_bb, reedsq_sc, rgsq_bb);
+            rgsq_sc = calc_rgsq_sc(coords, Nbb, Nsc, f_branch, nchain, box_size);
+            fprintf(thermo, "%llu\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n", t, mesh_energy, bond_energy, total_energy, acc_rate,
+                    ave_bondlen, reedsq_bb, reedsq_sc, rgsq_bb, rgsq_sc);
 
             // density profile
             fprintf(density_profile, "t = %llu\n", t);

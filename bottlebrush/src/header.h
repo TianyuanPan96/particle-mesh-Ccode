@@ -55,5 +55,6 @@ void mc_atom_displ(int iatom, double displ, int pm_type, unsigned long long *nac
 double calc_reedsq_bb(double **coords, int Nbb, int nchain, int natom_perchain, double box_size);
 double calc_reedsq_sc(double **coords, int Nbb, int Nsc, int f_branch, int nchain, double box_size);
 double calc_rgsq_bb(double **coords, int Nbb, int nchain, int natom_perchain, double box_size);
+double calc_rgsq_sc(double **coords, int Nbb, int Nsc, int f_branch, int nchain, double box_size);
 
 #endif

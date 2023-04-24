@@ -215,7 +215,7 @@ double calc_rgsq_bb(double **coords, int Nbb, int nchain, int natom_perchain, do
         }
         // calculate the relative distance of the beads w.r.t. the first bead
         // accounting for PBC
-        for (j = 0; j < Nbb; ++j)
+        for (j = 1; j < Nbb; ++j)
         {
             molbuf[j][0] = molbuf[j][0] - molbuf[0][0];
             molbuf[j][1] = molbuf[j][1] - molbuf[0][1];
@@ -224,6 +224,9 @@ double calc_rgsq_bb(double **coords, int Nbb, int nchain, int natom_perchain, do
             molbuf[j][1] = simbox_1dgetimage(molbuf[j][1], box_size);
             molbuf[j][2] = simbox_1dgetimage(molbuf[j][2], box_size);
         }
+        molbuf[0][0] = 0;
+        molbuf[0][1] = 0;
+        molbuf[0][2] = 0;
         // calculate the center of mass of this backbone
         for (j = 0; j < Nbb; ++j)
         {
@@ -246,5 +249,88 @@ double calc_rgsq_bb(double **coords, int Nbb, int nchain, int natom_perchain, do
         res += rgsq;
     }
     res /= nchain;
+    return res;
+}
+
+// calculate the radius of gyration of all sidechains
+double calc_rgsq_sc(double **coords, int Nbb, int Nsc, int f_branch, int nchain, double box_size)
+{
+    double res = 0;
+    double rg, rgsq;
+    double rx, ry, rz;
+    double com_rx, com_ry, com_rz;
+    double dx, dy, dz;
+    int i, j, k, isc, sc_beg, sc_end;
+    int natom_perchain, nsidechain;
+    double dist;
+    natom_perchain = Nbb * (f_branch * Nsc + 1);
+    nsidechain = nchain * Nbb * f_branch;
+    // a buffer variable which stores the position of beads within a molecule
+    double **molbuf;
+    molbuf = (double **)malloc(Nsc * sizeof(double *));
+    for (int i = 0; i < Nsc; ++i)
+    {
+        molbuf[i] = (double *)malloc(3 * sizeof(double));
+    }
+    for (i = 0; i < nchain; ++i)
+    {
+        for (j = 0; j < Nbb; ++j)
+        {
+            for (k = 0; k < f_branch; ++k)
+            {
+                rg = 0;
+                rgsq = 0;
+                com_rx = 0;
+                com_ry = 0;
+                com_rz = 0;
+                sc_beg = i * natom_perchain + Nbb + (j * f_branch + k) * Nsc;
+                // store coordinates of the backbone beads to the buffer
+                for (isc = 0; isc < Nsc; ++isc)
+                {
+                    rx = coords[sc_beg + isc][0];
+                    ry = coords[sc_beg + isc][1];
+                    rz = coords[sc_beg + isc][2];
+                    molbuf[isc][0] = rx;
+                    molbuf[isc][1] = ry;
+                    molbuf[isc][2] = rz;
+                }
+                // calculate the relative distance of the beads w.r.t. the first bead
+                // accounting for PBC
+                for (isc = 1; isc < Nsc; ++isc)
+                {
+                    molbuf[isc][0] = molbuf[isc][0] - molbuf[0][0];
+                    molbuf[isc][1] = molbuf[isc][1] - molbuf[0][1];
+                    molbuf[isc][2] = molbuf[isc][2] - molbuf[0][2];
+                    molbuf[isc][0] = simbox_1dgetimage(molbuf[isc][0], box_size);
+                    molbuf[isc][1] = simbox_1dgetimage(molbuf[isc][1], box_size);
+                    molbuf[isc][2] = simbox_1dgetimage(molbuf[isc][2], box_size);
+                }
+                molbuf[0][0] = 0;
+                molbuf[0][1] = 0;
+                molbuf[0][2] = 0;
+                // calculate the center of mass of this backbone
+                for (isc = 0; isc < Nsc; ++isc)
+                {
+                    com_rx += molbuf[isc][0];
+                    com_ry += molbuf[isc][1];
+                    com_rz += molbuf[isc][2];
+                }
+                com_rx /= Nsc;
+                com_ry /= Nsc;
+                com_rz /= Nsc;
+                // calculate Rg
+                for (isc = 0; isc < Nsc; ++isc)
+                {
+                    dx = molbuf[isc][0] - com_rx;
+                    dy = molbuf[isc][1] - com_ry;
+                    dz = molbuf[isc][2] - com_rz;
+                    rgsq += dx * dx + dy * dy + dz * dz;
+                }
+                rgsq /= Nsc;
+                res += rgsq;
+            }
+        }
+    }
+    res /= nsidechain;
     return res;
 }
